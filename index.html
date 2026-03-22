@@ -1,15 +1,253 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#0F172A" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <title>RunAnywhere AI Starter</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>" />
+  <title>GestureOS PRO</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
-<body>
-  <div id="root"></div>
-  <script type="module" src="/src/main.tsx"></script>
+
+<body class="bg-[#050A14] text-slate-200 font-['Outfit'] h-screen overflow-hidden selection:bg-accent/30 selection:text-white">
+  
+  <!-- Landing Entry -->
+  <div id="landing-page"
+    class="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#050A14] transition-all duration-700 ease-in-out">
+    <div class="relative w-full max-w-xl text-center px-8">
+      <div class="absolute -top-20 left-1/2 -translate-x-1/2 w-64 h-64 bg-accent/20 blur-[100px] rounded-full"></div>
+      
+      <h1 class="text-7xl font-bold tracking-tight mb-6 relative">
+        <span class="bg-clip-text text-transparent bg-gradient-to-b from-white to-slate-500">
+          GestureOS
+        </span>
+        <span class="absolute -top-4 -right-8 text-xs font-black bg-accent text-[#050A14] px-1.5 py-0.5 rounded rotate-12">PRO</span>
+      </h1>
+
+      <p class="text-lg text-slate-400 mb-10 font-light leading-relaxed max-w-sm mx-auto">
+        Next-gen spatial interface with <span class="text-white font-medium">MediaPipe Intelligence</span> & <span class="text-accent font-medium">Gemini AI</span> background assistant.
+      </p>
+
+      <button id="start-btn"
+        class="group relative px-10 py-5 bg-white text-[#050A14] font-bold rounded-2xl transition-all hover:scale-105 active:scale-95 shadow-[0_20px_40px_rgba(0,0,0,0.4)] overflow-hidden">
+        <span class="relative z-10 flex items-center gap-3">
+          Initialize System
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="group-hover:translate-x-1 transition-transform"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </span>
+        <div class="absolute inset-0 bg-gradient-to-r from-accent to-cyan-400 opacity-0 group-hover:opacity-10 transition-opacity"></div>
+      </button>
+
+      <div class="mt-12 flex flex-col items-center gap-4">
+        <div class="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-full backdrop-blur-md">
+           <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
+           <span class="text-[11px] font-bold tracking-[0.15em] text-slate-500 uppercase">System Ready</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- App Core -->
+  <div id="app-container" class="hidden flex h-screen w-full bg-[#050A14]">
+    
+    <!-- Sidebar -->
+    <aside class="w-[300px] border-r border-white/5 bg-black/20 backdrop-blur-3xl flex flex-col p-6 z-50 shrink-0">
+      <div class="mb-10 flex items-center gap-3">
+        <div class="w-8 h-8 bg-accent rounded-lg flex items-center justify-center text-[#050A14] font-black italic">G</div>
+        <h2 class="text-lg font-bold tracking-tight">GestureOS</h2>
+      </div>
+
+      <div class="space-y-4 flex-1 overflow-y-auto pr-2 custom-scrollbar">
+        <p class="text-[10px] font-black text-slate-600 tracking-[0.2em] uppercase mb-2">Detected Mappings</p>
+        
+        <!-- Gesture Cards -->
+        <div id="gesture-palm" class="gesture-card group">
+          <div class="gesture-icon-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v5"/><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v10"/><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
+          </div>
+          <div class="flex-1">
+            <h3 class="text-xs font-bold text-slate-300">Open Palm</h3>
+            <p class="text-[10px] text-slate-500 font-medium">Scroll Up</p>
+          </div>
+          <div class="status-indicator"></div>
+        </div>
+
+        <div id="gesture-fist" class="gesture-card group">
+          <div class="gesture-icon-box">
+             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10V8a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v2"/><path d="M18 10h2a2 2 0 0 1 2 2v1a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5v-1a2 2 0 0 1 2-2h2"/><path d="M6 10v4"/><path d="M10 10v4"/><path d="M14 10v4"/></svg>
+          </div>
+          <div class="flex-1">
+            <h3 class="text-xs font-bold text-slate-300">Closed Fist</h3>
+            <p class="text-[10px] text-slate-500 font-medium">Scroll Down</p>
+          </div>
+          <div class="status-indicator"></div>
+        </div>
+
+        <div id="gesture-peace" class="gesture-card group">
+          <div class="gesture-icon-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 10V4a2 2 0 1 1 4 0v6"/><path d="M14 10V6a2 2 0 1 1 4 0v4"/><path d="M18 10V8a2 2 0 1 1 4 0v4"/><path d="M7 22h10a3 3 0 0 0 3-3v-2l-6-6h-4l-6 6v2a3 3 0 0 0 3 3z"/></svg>
+          </div>
+          <div class="flex-1">
+            <h3 class="text-xs font-bold text-slate-300">Peace Sign</h3>
+            <p class="text-[10px] text-slate-500 font-medium">Capture Screen</p>
+          </div>
+          <div class="status-indicator"></div>
+        </div>
+
+        <div id="gesture-thumb" class="gesture-card group">
+          <div class="gesture-icon-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v12h3V10H7z"/><path d="M10 10c0-2 1-3 2-4s2-2 3-2h1c1 0 2 1 2 2v6h2a2 2 0 0 1 2 2v1a5 5 0 0 1-5 5h-6l-1-1v-8z"/></svg>
+          </div>
+          <div class="flex-1">
+            <h3 class="text-xs font-bold text-slate-300">Thumbs Up</h3>
+            <p class="text-[10px] text-slate-500 font-medium">Play / Pause</p>
+          </div>
+          <div class="status-indicator"></div>
+        </div>
+
+        <div id="gesture-index" class="gesture-card group">
+          <div class="gesture-icon-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 10V2a2 2 0 1 1 4 0v8"/><path d="M18 12V10a2 2 0 1 1 4 0v2"/><path d="M7 22h10a3 3 0 0 0 3-3v-2l-6-6h-4l-6 6v2a3 3 0 0 0 3 3z"/></svg>
+          </div>
+          <div class="flex-1">
+            <h3 class="text-xs font-bold text-slate-300">Pointing</h3>
+            <p class="text-[10px] text-slate-500 font-medium">Left Click</p>
+          </div>
+          <div class="status-indicator"></div>
+        </div>
+      </div>
+
+      <!-- System Status Minimal -->
+      <div class="mt-auto pt-6 border-t border-white/5 space-y-4">
+        <div class="flex items-center justify-between">
+           <span class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Confidence</span>
+           <span id="threshold-value" class="text-xs font-mono text-accent">0.70</span>
+        </div>
+        <input type="range" id="confidence-slider" min="0.6" max="0.95" step="0.05" value="0.7"
+          class="w-full h-1 bg-white/10 rounded-full appearance-none cursor-pointer accent-accent" />
+        
+        <div class="flex items-center justify-between text-[11px] text-slate-400">
+          <span>Native Bridge</span>
+          <div id="system-status-dot" class="w-2 h-2 rounded-full bg-slate-700"></div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main View -->
+    <main class="flex-1 flex flex-col p-8 relative overflow-hidden">
+      <!-- Top HUD -->
+      <div class="flex justify-between items-center mb-8 z-10">
+        <div>
+          <h2 class="text-2xl font-bold text-white tracking-tight" id="system-status-text">System Initializing</h2>
+          <p class="text-xs text-slate-500 uppercase tracking-widest font-bold">Local-First Neural Engine</p>
+        </div>
+        <div class="flex gap-2">
+           <div class="hud-stat">
+             <span class="hud-stat-label">FPS</span>
+             <span id="fps-counter" class="hud-stat-val">0</span>
+           </div>
+           <div class="hud-stat">
+             <span class="hud-stat-label">Stability</span>
+             <span id="stability-counter" class="hud-stat-val">0%</span>
+           </div>
+        </div>
+      </div>
+
+      <!-- Camera Feed Wrapper -->
+      <div id="camera-container" 
+        class="relative flex-1 rounded-[40px] overflow-hidden border border-white/5 bg-black/40 shadow-[0_40px_100px_rgba(0,0,0,0.6)] group">
+        
+        <video id="webcam-feed" class="w-full h-full object-cover transform scale-x-[-1]" autoplay playsinline muted></video>
+
+        <!-- Loading HUD -->
+        <div id="loading-overlay" class="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#050A14]/80 backdrop-blur-xl transition-opacity duration-700">
+           <div class="relative w-24 h-24 mb-6">
+             <div class="absolute inset-0 border-4 border-white/5 rounded-full"></div>
+             <div class="absolute inset-0 border-4 border-accent rounded-full border-t-transparent animate-spin"></div>
+           </div>
+           <p id="loading-text" class="text-xl font-medium tracking-tight mb-2">Neural Engine Offline</p>
+           <div class="w-48 h-1 bg-white/5 rounded-full mt-4 overflow-hidden">
+             <div id="loading-bar" class="h-full bg-accent w-0 transition-all duration-300"></div>
+           </div>
+        </div>
+
+        <!-- Real-time HUD Elements -->
+        <div class="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-4 z-20 pointer-events-none">
+          <div id="detected-gesture-label" class="gesture-live-pill opacity-0">
+             Show Gesture
+          </div>
+          <div class="relative w-48 h-1.5 bg-black/40 rounded-full overflow-hidden backdrop-blur-md">
+            <div id="confidence-bar" class="h-full bg-accent w-0 transition-all duration-300"></div>
+          </div>
+        </div>
+
+        <!-- Native Mode Toggle Overlay -->
+        <div class="absolute top-6 left-6 p-4 bg-black/40 backdrop-blur-xl border border-white/10 rounded-2xl flex items-center gap-4 group-hover:opacity-100 opacity-0 transition-opacity">
+           <span class="text-xs font-bold text-slate-300">Overlay Click-through</span>
+           <label class="relative inline-flex items-center cursor-pointer">
+             <input id="overlay-mode-toggle" type="checkbox" class="sr-only peer">
+             <div class="w-11 h-6 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:bg-accent after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+           </label>
+        </div>
+      </div>
+
+      <!-- Action History Overlay-right -->
+      <div class="absolute top-32 right-12 w-80 max-h-[400px] pointer-events-none">
+        <div class="flex items-center justify-between mb-4 pointer-events-auto">
+           <h3 class="text-[10px] font-black text-slate-500 tracking-widest uppercase">Action Feed</h3>
+           <button id="clear-log-btn" class="text-[10px] text-slate-500 hover:text-accent font-bold uppercase transition-colors">Clear</button>
+        </div>
+        <div id="action-log" class="space-y-3 custom-scrollbar overflow-y-auto max-h-[350px]">
+           <!-- Log entries -->
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Toast Notifier -->
+  <div id="toast-container" class="fixed top-10 left-1/2 -translate-x-1/2 z-[200] flex flex-col gap-2"></div>
+
+  <!-- AI Assistant Panel (PRO GLASS) -->
+  <section id="assistant-root" class="assistant-root">
+    <button id="assistant-toggle" class="bg-white text-black px-6 py-3 rounded-2xl font-bold shadow-2xl hover:scale-105 transition-all text-sm flex items-center gap-2">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+      Assistant Engine
+    </button>
+
+    <div id="assistant-panel" class="assistant-pro-panel" aria-hidden="true">
+      <header class="p-5 flex justify-between items-center border-b border-white/10">
+        <div>
+          <h3 class="text-sm font-bold tracking-tight">Gemini Intelligence</h3>
+          <p id="assistant-status" class="text-[10px] text-slate-500 uppercase font-black tracking-widest mt-1">Ready</p>
+        </div>
+        <div class="flex gap-2">
+          <button id="assistant-mic-toggle" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+          </button>
+          <button id="assistant-close" class="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <div id="assistant-messages" class="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar"></div>
+
+      <form id="assistant-form" class="p-4 bg-white/5 border-t border-white/10">
+        <div class="relative flex items-center gap-2">
+           <input id="assistant-input" type="text" placeholder="Command Gemini..." 
+             class="flex-1 bg-black/40 border border-white/10 px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-accent transition-colors" autocomplete="off" />
+           <button type="submit" class="p-3 bg-white text-black rounded-xl hover:bg-accent transition-colors">
+             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+           </button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <script type="module" src="/src/main.js"></script>
+  <script type="module" src="/src/assistant.js"></script>
 </body>
+
 </html>
