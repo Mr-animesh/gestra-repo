@@ -8,7 +8,7 @@ from __future__ import annotations
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -100,6 +100,10 @@ class GestureFrame:
     stable: bool
     cursor_x: int
     cursor_y: int
+    stable_count: int = 0
+    history_len: int = 0
+    stability: float = 0.0
+    landmarks_norm: Optional[List[Dict[str, float]]] = None
 
 
 class GestureDetector:
@@ -134,16 +138,21 @@ class GestureDetector:
     def close(self) -> None:
         self._landmarker.close()
 
-    def _stability(self, gesture: str, hand_detected: bool, confidence: float) -> bool:
+    def _stability_tuple(
+        self, gesture: str, hand_detected: bool, confidence: float
+    ) -> Tuple[bool, int, int, float]:
         self._history.append(gesture)
         self._history = self._history[-MAX_HISTORY:]
         stable_count = sum(1 for g in self._history if g == gesture)
-        return (
+        history_len = len(self._history)
+        stability = stable_count / max(history_len, 1)
+        stable = (
             hand_detected
             and gesture != "none"
             and confidence >= self._min_confidence
             and stable_count >= REQUIRED_STABLE_FRAMES
         )
+        return stable, stable_count, history_len, stability
 
     def process_bgr(self, frame_bgr) -> GestureFrame:
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -162,11 +171,19 @@ class GestureDetector:
                 stable=False,
                 cursor_x=self._sw // 2,
                 cursor_y=self._sh // 2,
+                stable_count=0,
+                history_len=0,
+                stability=0.0,
+                landmarks_norm=None,
             )
 
         lm = result.hand_landmarks[0]
         gesture, confidence = classify_gesture_from_landmarks(lm)
-        stable = self._stability(gesture, True, confidence)
+        stable, stable_count, history_len, stability = self._stability_tuple(gesture, True, confidence)
+
+        landmarks_norm: List[Dict[str, float]] = [
+            {"x": float(p.x), "y": float(p.y), "z": float(p.z)} for p in lm
+        ]
 
         index_tip = lm[8]
         nx = 1.0 - float(index_tip.x)
@@ -181,4 +198,8 @@ class GestureDetector:
             stable=stable,
             cursor_x=cx,
             cursor_y=cy,
+            stable_count=stable_count,
+            history_len=history_len,
+            stability=stability,
+            landmarks_norm=landmarks_norm,
         )

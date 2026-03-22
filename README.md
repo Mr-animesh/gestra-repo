@@ -1,8 +1,8 @@
 # GestureOS (Gestra2)
 
-Webcam **hand tracking** (MediaPipe) mapped to **OS control** (cursor, click, scroll). The **recommended MVP** is the **Python** pipeline below: **MediaPipe + OpenCV + PyAutoGUI**. It avoids native Node bindings (`robotjs`), **nut-js**, and fragile Electron-side automation.
+Webcam **hand tracking** (MediaPipe) mapped to **OS control** via **Python** (**MediaPipe Tasks + OpenCV + PyAutoGUI**). This avoids native Node bindings (`robotjs`), **nut-js**, and fragile Electron-side automation.
 
-The **Electron / Vite** UI remains optional for preview and assistant features; **renderer OS actions are stubbed** — they log to the console and may `POST` to an optional local Python listener. **The Electron-based OS control path is deprecated** due to install and OS-level limitations; use **python-core** for real desktop automation.
+The **Electron / Vite** UI is optional: it runs the same **gesture classifier** in the browser and can **forward actions** to Python over HTTP when **`python main.py --api`** is running. **The Electron-based OS control path is deprecated** for desktop automation; use **python-core** for reliable control.
 
 ## Python gesture engine (working MVP)
 
@@ -14,59 +14,85 @@ The **Electron / Vite** UI remains optional for preview and assistant features; 
    python main.py
    ```
 
-   On first run, a **hand landmarker** `.task` model is downloaded into `python-core/models/` (official MediaPipe storage URL).
+   On first run, the **hand landmarker** `.task` model is downloaded into `python-core/models/`.
 
-2. **Use**
+2. **Gestures → actions** (21 landmarks, finger up/down rules; **stable ≈ 6 frames** @ ~0.7 confidence)
 
-   - Allow the camera when prompted (OpenCV).
-   - **Index fingertip** moves the cursor (smoothed).
-   - **Pinch** (thumb + index close) triggers a **left click** (1 second cooldown).
-   - Optional: quick **up/down** motion of the index finger accumulates into **scroll** (disable with `python main.py --no-scroll`).
-   - Press **ESC** in the preview window to exit.
+   | Gesture | Action |
+   |---------|--------|
+   | Open palm (four fingers + thumb extended) | Scroll **up** continuously while held |
+   | Closed fist | Scroll **down** continuously while held |
+   | Peace (index + middle up, spread) | **PrintScreen** (once per stable pose, **1 s** cooldown) |
+   | Thumbs up only | **Media play/pause** (**1 s** cooldown) |
+   | Index point only | Move cursor with index tip; **left click** when pose becomes stable (**1 s** cooldown) |
 
-3. **Optional bridge from the web UI**
+   Press **ESC** in the OpenCV preview to exit (OpenCV is **off** when using `--api` alone; add **`--window`** if you want both the stream and a local preview).
+
+3. **Collective mode (recommended with Electron)** — one camera, one MediaPipe pipeline
+
+   **Python** grabs the webcam, runs MediaPipe + PyAutoGUI, and serves:
+
+   - **`GET /camera.mjpg`** — MJPEG preview (mirrored, with HUD) for the UI.
+   - **`GET /api/v1/state`** — JSON for the HUD (`gesture`, `stable`, `fps`, `landmarks`, …).
+
+   **Electron** does **not** open the camera in this mode: it shows the MJPEG in **`#python-vision-feed`** and polls state (~20 Hz) so **`#app-container`** overlays stay in sync. **OS actions are not duplicated** from the renderer (Python already runs them).
+
+   Terminal A:
 
    ```bash
+   cd python-core
    python main.py --api
    ```
 
-   Listens on `http://127.0.0.1:8765` — `POST /gesture` with JSON body (logged; extend to drive actions).
+   Terminal B:
+
+   ```bash
+   npm run dev
+   ```
+
+   If the bridge responds with **`vision.collective`**, the app switches to collective vision automatically.
+
+4. **Local camera mode** (no Python `--api`, or bridge down)
+
+   The app uses **getUserMedia** + **browser MediaPipe** and may still **`POST /gesture`** to Python for OS actions when the bridge is up.
+
+   - **Electron** → **`electronAPI.pythonBridge`** (includes **`GET /api/v1/state`** for IPC). **`GET /api/v1/bridge`** returns the full manifest.
+   - Optional env: **`GESTRA_PYTHON_URL`** / **`VITE_PYTHON_BRIDGE_URL`** if the bridge is not on `127.0.0.1:8765`.
 
 ### Python layout
 
-- `python-core/main.py` — camera loop, pipeline wiring, optional HTTP API.
-- `python-core/gesture.py` — MediaPipe Hands, fingertip positions, pinch state.
-- `python-core/actions.py` — PyAutoGUI: smoothed `moveTo`, click cooldown, scroll.
+- `python-core/main.py` — camera loop, stability → actions; **`--api`** adds MJPEG + `/api/v1/state` (threaded HTTP).
+- `python-core/gesture.py` — MediaPipe Hands landmarks + gesture labels + stability buffer.
+- `python-core/actions.py` — PyAutoGUI: smoothing, discrete cooldowns, repeating scroll.
 
-Console logs include **Hand detected**, **Cursor moving** (throttled), and **Click triggered**.
+Logs include **Hand detected**, **Cursor moving** (throttled), **Click triggered**, **Screenshot**, **Play/pause**.
 
 ## Legacy Electron app (optional)
 
 - **Node.js** 18+ recommended.
-- **Internet** on first run for MediaPipe WASM (browser tasks) CDN assets.
+- **Internet** on first run for MediaPipe WASM CDN assets.
+- **Window behavior:** the shell is a **compact floating panel** (default **bottom-right** of the work area). It is **not** forced to the foreground: you can put other apps on top. **Closing the window hides to the tray** (bridge and timers keep running); use **Quit completely** in the tray menu to exit. Tray **Pin above other windows** (or `electronAPI.setPinAbove(true)`) restores an always-on-top floating palette when you want it.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Gesture labels in the UI still appear, but **system actions from the renderer are stubs**; run **python-core** for actual OS control.
-
 ### Scripts
 
 | Command | Purpose |
 |--------|---------|
-| `npm run dev` | Vite + Electron (legacy). |
+| `npm run dev` | Vite + Electron. |
 | `npm run build` | Production Vite build. |
 | `npm run preview` | Static preview only. |
 
 ### Project layout
 
-- `python-core/` — **supported** gesture → OS pipeline.
-- `electron/main.cjs` — legacy window / tray (automation not required for MVP).
-- `src/main.js` — UI + browser MediaPipe gesture preview.
-- `src/gesture-mediapipe.js` — `@mediapipe/tasks-vision` hand gestures (browser).
-- `src/actions.js` — stubbed OS calls + optional `POST /gesture` to Python.
+- `python-core/` — **supported** desktop gesture → OS pipeline.
+- `electron/main.cjs` — window / tray (automation optional).
+- `src/main.js` — collective vision (Python MJPEG + state) or local webcam + MediaPipe.
+- `src/gesture-mediapipe.js` — browser hand gestures (mirrors Python rules).
+- `src/actions.js` — forwards actions to Python **`POST /gesture`**.
 
 ## License
 

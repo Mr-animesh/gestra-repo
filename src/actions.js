@@ -6,7 +6,7 @@ let repeatingGesture = null;
 let repeatTimer = null;
 
 /** MediaPipe gesture id → human label (UI / TTS) */
-const gestureLabels = {
+export const gestureLabels = {
   palm: 'Scroll up',
   fist: 'Scroll down',
   peace: 'Screenshot',
@@ -72,22 +72,122 @@ async function captureCanvasScreenshot() {
   link.click();
 }
 
-async function invokePerformAction(action, options = null) {
-  console.log(
-    '[GestureOS/Renderer] OS automation stubbed — use `python-core` (MediaPipe + PyAutoGUI) for real control.',
-    action,
-    options ?? ''
-  );
+export const DEFAULT_PYTHON_BRIDGE_URL =
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_PYTHON_BRIDGE_URL) ||
+  'http://127.0.0.1:8765';
 
+let pythonVisionCollective = false;
+
+/** Python owns camera + MediaPipe; Electron only shows MJPEG + polls HUD (no duplicate OS / gestures). */
+export function setPythonVisionCollective(on) {
+  pythonVisionCollective = Boolean(on);
+}
+
+export function isPythonVisionCollective() {
+  return pythonVisionCollective;
+}
+
+/** Latest HUD JSON from python-core (Electron: main-process fetch). */
+export async function fetchPythonHudState(baseUrl) {
+  const base = String(baseUrl || DEFAULT_PYTHON_BRIDGE_URL).replace(/\/+$/, '');
+  if (window.electronAPI?.pythonBridge) {
+    const r = await window.electronAPI.pythonBridge({ op: 'state' });
+    return r?.ok ? r.data : null;
+  }
   try {
-    await fetch('http://127.0.0.1:8765/gesture', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, options: options ?? null, source: 'gestureos-renderer' }),
-      mode: 'cors',
-    });
+    const res = await fetch(`${base}/api/v1/state`, { method: 'GET', mode: 'cors' });
+    return res.ok ? await res.json() : null;
   } catch {
-    // Optional: start Python with `python main.py --api` to receive events; otherwise ignore.
+    return null;
+  }
+}
+
+/** Shape expected by ui.js `updateOverlay`. */
+export function mapPythonStateToOverlay(j) {
+  if (!j) {
+    return {
+      handDetected: false,
+      gesture: 'none',
+      confidence: 0,
+      stable: false,
+      stability: 0,
+      fps: 0,
+    };
+  }
+  return {
+    handDetected: Boolean(j.handDetected),
+    gesture: j.gesture || 'none',
+    confidence: Number(j.confidence) || 0,
+    stable: Boolean(j.stable),
+    stability: Number(j.stability) || 0,
+    fps: Number(j.fps) || 0,
+  };
+}
+
+/** Probe Python bridge; Electron uses main-process fetch (see electron/main.cjs). */
+export async function probePythonBridge() {
+  if (window.electronAPI?.pythonBridge) {
+    const r = await window.electronAPI.pythonBridge({ op: 'bridge' });
+    return {
+      ok: Boolean(r?.ok),
+      via: 'electron',
+      data: r?.data ?? null,
+      baseUrl: r?.baseUrl || DEFAULT_PYTHON_BRIDGE_URL,
+    };
+  }
+  const base = DEFAULT_PYTHON_BRIDGE_URL;
+  try {
+    const res = await fetch(`${base}/api/v1/bridge`, { method: 'GET', mode: 'cors' });
+    if (res.ok) {
+      const data = await res.json().catch(() => null);
+      return { ok: true, via: 'renderer', data, baseUrl: base };
+    }
+    const h = await fetch(`${base}/health`, { method: 'GET', mode: 'cors' });
+    return { ok: h.ok, via: 'renderer', data: null, baseUrl: base };
+  } catch {
+    return { ok: false, via: 'renderer', data: null, baseUrl: base };
+  }
+}
+
+async function invokePerformAction(action, options = null, { silent = false } = {}) {
+  if (pythonVisionCollective) {
+    return;
+  }
+
+  const bridgeBase = DEFAULT_PYTHON_BRIDGE_URL.replace(/\/+$/, '');
+  console.log('[GestureOS/Renderer] Forwarding OS action to Python bridge if available:', action, options ?? '');
+
+  let bridgeOk = false;
+  if (window.electronAPI?.pythonBridge) {
+    try {
+      const r = await window.electronAPI.pythonBridge({
+        op: 'gesture',
+        action,
+        options: options ?? null,
+      });
+      bridgeOk = Boolean(r?.ok);
+      if (!bridgeOk && r?.error) {
+        console.warn('[GestureOS/Renderer] python-bridge IPC:', r.error);
+      }
+    } catch (e) {
+      console.warn('[GestureOS/Renderer] python-bridge IPC failed:', e);
+    }
+  }
+  if (!bridgeOk) {
+    try {
+      const res = await fetch(`${bridgeBase}/gesture`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, options: options ?? null, source: 'gestureos-renderer' }),
+        mode: 'cors',
+      });
+      bridgeOk = res.ok;
+      if (!res.ok) {
+        console.warn('[GestureOS/Renderer] Python bridge returned', res.status);
+      }
+    } catch {
+      // Run: cd python-core && python main.py --api
+    }
   }
 
   if (action === 'screenshot') {
@@ -95,7 +195,11 @@ async function invokePerformAction(action, options = null) {
     return;
   }
 
-  showToast(`OS action "${action}" is handled by the Python engine (see README).`);
+  if (!silent) {
+    showToast(
+      `Action “${action}” sent to Python OS bridge. If nothing happens, run: python main.py --api (see README).`
+    );
+  }
 }
 
 function stopRepeatingAction() {
@@ -118,7 +222,7 @@ async function triggerGesture(gesture, { silent = false, bypassCooldown = false 
   }
 
   try {
-    await invokePerformAction(action);
+    await invokePerformAction(action, null, { silent });
   } catch (err) {
     console.error('[GestureOS/Renderer] performAction failed:', err);
     showToast(`Action failed: ${label}`);

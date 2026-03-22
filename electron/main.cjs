@@ -1,11 +1,27 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, session } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  Menu,
+  Tray,
+  nativeImage,
+  session,
+  screen: electronScreen,
+} = require('electron');
 const path = require('path');
 const { keyboard, Key, mouse, screen } = require('@nut-tree-fork/nut-js');
 
 mouse.config.mouseSpeed = 2000;
 
+/** Python OS bridge (python-core `python main.py --api`). Override with GESTRA_PYTHON_URL. */
+const PYTHON_BRIDGE_BASE = String(process.env.GESTRA_PYTHON_URL || 'http://127.0.0.1:8765').replace(/\/+$/, '');
+
 let mainWindow;
 let tray;
+/** When false, closing the window hides to tray (Python bridge + gestures keep running). */
+let appIsQuitting = false;
+/** User-toggle: keep small window above other apps (floating palette). */
+let pinWindowAbove = false;
 
 const GEMINI_DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1';
 const GEMINI_DEFAULT_MODEL = 'gemini-1.5-flash';
@@ -190,6 +206,59 @@ async function runOsAction(actionRaw, options) {
   console.log('[GestureOS/Main] runOsAction done:', action);
 }
 
+/**
+ * Talk to the local Python bridge from the main process (no renderer CORS).
+ * ops: health | bridge | gesture
+ */
+async function pythonBridgeIpc(payload) {
+  const op = payload?.op;
+  const withBase = (obj) => ({ ...obj, baseUrl: PYTHON_BRIDGE_BASE });
+  if (!op) {
+    return withBase({ ok: false, error: 'python-bridge: missing op' });
+  }
+  try {
+    if (op === 'health') {
+      const res = await fetch(`${PYTHON_BRIDGE_BASE}/health`);
+      const text = await res.text();
+      let data = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        data = { raw: text };
+      }
+      return withBase({ ok: res.ok, status: res.status, data });
+    }
+    if (op === 'bridge') {
+      const res = await fetch(`${PYTHON_BRIDGE_BASE}/api/v1/bridge`);
+      const data = await res.json().catch(() => null);
+      return withBase({ ok: res.ok, status: res.status, data });
+    }
+    if (op === 'state') {
+      const res = await fetch(`${PYTHON_BRIDGE_BASE}/api/v1/state`);
+      const data = await res.json().catch(() => null);
+      return withBase({ ok: res.ok, status: res.status, data });
+    }
+    if (op === 'gesture') {
+      const action = payload?.action;
+      const options = payload?.options ?? null;
+      const res = await fetch(`${PYTHON_BRIDGE_BASE}/gesture`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          options,
+          source: 'electron-main',
+        }),
+      });
+      return withBase({ ok: res.ok, status: res.status });
+    }
+    return withBase({ ok: false, error: `python-bridge: unknown op "${op}"` });
+  } catch (err) {
+    console.warn('[GestureOS/Main] python-bridge:', err?.message || err);
+    return withBase({ ok: false, error: String(err?.message || err) });
+  }
+}
+
 function setupMediaPermissions() {
   const allowMediaPermission = (permission) =>
     permission === 'media' ||
@@ -216,17 +285,83 @@ function setupMediaPermissions() {
   });
 }
 
+const FLOATING_WIDTH = 400;
+const FLOATING_HEIGHT = 640;
+const FLOATING_MARGIN = 16;
+
+function placeFloatingWindow(win) {
+  const { width: wa, height: wh, x: wx, y: wy } = electronScreen.getPrimaryDisplay().workArea;
+  win.setBounds({
+    x: wx + wa - FLOATING_WIDTH - FLOATING_MARGIN,
+    y: wy + wh - FLOATING_HEIGHT - FLOATING_MARGIN,
+    width: FLOATING_WIDTH,
+    height: FLOATING_HEIGHT,
+  });
+}
+
+function applyAlwaysOnTopPreference() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (pinWindowAbove) {
+    mainWindow.setAlwaysOnTop(true, 'floating');
+    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  } else {
+    mainWindow.setAlwaysOnTop(false);
+    mainWindow.setVisibleOnAllWorkspaces(false);
+  }
+}
+
+function rebuildTrayMenu() {
+  if (!tray) return;
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: 'Show GestureOS',
+        click: () => {
+          mainWindow?.show();
+          mainWindow?.focus();
+        },
+      },
+      {
+        label: 'Hide to background',
+        click: () => mainWindow?.hide(),
+      },
+      { type: 'separator' },
+      {
+        label: 'Pin above other windows',
+        type: 'checkbox',
+        checked: pinWindowAbove,
+        click: (item) => {
+          pinWindowAbove = Boolean(item.checked);
+          applyAlwaysOnTopPreference();
+          rebuildTrayMenu();
+        },
+      },
+      { type: 'separator' },
+      {
+        label: 'Quit completely',
+        click: () => {
+          appIsQuitting = true;
+          app.quit();
+        },
+      },
+    ])
+  );
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 480,
-    height: 780,
-    minWidth: 420,
-    minHeight: 620,
-    alwaysOnTop: true,
+    width: FLOATING_WIDTH,
+    height: FLOATING_HEIGHT,
+    minWidth: 340,
+    minHeight: 480,
+    maxWidth: 720,
+    maxHeight: 900,
+    alwaysOnTop: false,
     autoHideMenuBar: true,
     frame: true,
     backgroundColor: '#081121',
     title: 'GestureOS',
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -236,8 +371,20 @@ function createWindow() {
     },
   });
 
-  mainWindow.setAlwaysOnTop(true, 'screen-saver');
-  mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  placeFloatingWindow(mainWindow);
+  applyAlwaysOnTopPreference();
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.show();
+  });
+
+  mainWindow.on('close', (event) => {
+    if (appIsQuitting) {
+      return;
+    }
+    event.preventDefault();
+    mainWindow?.hide();
+  });
 
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
@@ -252,21 +399,16 @@ function createTray() {
       'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9s2son8AAAAASUVORK5CYII='
     )
   );
-  tray.setToolTip('GestureOS');
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: 'Show GestureOS', click: () => mainWindow?.show() },
-      { label: 'Hide Overlay', click: () => mainWindow?.hide() },
-      { type: 'separator' },
-      {
-        label: 'Quit',
-        click: () => {
-          app.quit();
-        },
-      },
-    ])
-  );
-  tray.on('double-click', () => mainWindow?.show());
+  tray.setToolTip('GestureOS — runs in background; use Quit to exit');
+  rebuildTrayMenu();
+  tray.on('double-click', () => {
+    if (mainWindow?.isVisible()) {
+      mainWindow.hide();
+    } else {
+      mainWindow?.show();
+      mainWindow?.focus();
+    }
+  });
 }
 
 app.whenReady().then(() => {
@@ -280,6 +422,8 @@ app.whenReady().then(() => {
   if (app.isPackaged) {
     app.setLoginItemSettings({ openAtLogin: true });
   }
+
+  ipcMain.handle('python-bridge', async (_event, payload) => pythonBridgeIpc(payload));
 
   ipcMain.handle('perform-action', async (_event, payload) => {
     const action = typeof payload === 'string' ? payload : payload?.action;
@@ -297,7 +441,20 @@ app.whenReady().then(() => {
     mainWindow?.setIgnoreMouseEvents(Boolean(enabled), { forward: true });
   });
   ipcMain.handle('hide-window', async () => mainWindow?.hide());
-  ipcMain.handle('show-window', async () => mainWindow?.show());
+  ipcMain.handle('show-window', async () => {
+    mainWindow?.show();
+    mainWindow?.focus();
+  });
+  ipcMain.handle('set-pin-above', async (_event, enabled) => {
+    pinWindowAbove = Boolean(enabled);
+    applyAlwaysOnTopPreference();
+    rebuildTrayMenu();
+    return { ok: true, pinWindowAbove };
+  });
+  ipcMain.handle('get-window-mode', async () => ({
+    pinWindowAbove,
+    floating: { width: FLOATING_WIDTH, height: FLOATING_HEIGHT },
+  }));
 
   createWindow();
   createTray();

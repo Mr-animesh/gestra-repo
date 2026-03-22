@@ -1,7 +1,6 @@
-"use strict";
-const require$$0 = require("electron");
-const require$$1 = require("path");
-const require$$2 = require("@nut-tree-fork/nut-js");
+import require$$0 from "electron";
+import require$$1 from "path";
+import require$$2 from "@nut-tree-fork/nut-js";
 function getDefaultExportFromCjs(x) {
   return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, "default") ? x["default"] : x;
 }
@@ -10,12 +9,24 @@ var hasRequiredMain;
 function requireMain() {
   if (hasRequiredMain) return main$1;
   hasRequiredMain = 1;
-  const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, session } = require$$0;
+  const {
+    app,
+    BrowserWindow,
+    ipcMain,
+    Menu,
+    Tray,
+    nativeImage,
+    session,
+    screen: electronScreen
+  } = require$$0;
   const path = require$$1;
   const { keyboard, Key, mouse, screen } = require$$2;
   mouse.config.mouseSpeed = 2e3;
+  const PYTHON_BRIDGE_BASE = String(process.env.GESTRA_PYTHON_URL || "http://127.0.0.1:8765").replace(/\/+$/, "");
   let mainWindow;
   let tray;
+  let appIsQuitting = false;
+  let pinWindowAbove = false;
   const GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1";
   const GEMINI_DEFAULT_MODEL = "gemini-1.5-flash";
   const XAI_DEFAULT_BASE_URL = "https://api.x.ai/v1";
@@ -175,6 +186,54 @@ function requireMain() {
     }
     console.log("[GestureOS/Main] runOsAction done:", action);
   }
+  async function pythonBridgeIpc(payload) {
+    const op = payload == null ? void 0 : payload.op;
+    const withBase = (obj) => ({ ...obj, baseUrl: PYTHON_BRIDGE_BASE });
+    if (!op) {
+      return withBase({ ok: false, error: "python-bridge: missing op" });
+    }
+    try {
+      if (op === "health") {
+        const res = await fetch(`${PYTHON_BRIDGE_BASE}/health`);
+        const text = await res.text();
+        let data = null;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch {
+          data = { raw: text };
+        }
+        return withBase({ ok: res.ok, status: res.status, data });
+      }
+      if (op === "bridge") {
+        const res = await fetch(`${PYTHON_BRIDGE_BASE}/api/v1/bridge`);
+        const data = await res.json().catch(() => null);
+        return withBase({ ok: res.ok, status: res.status, data });
+      }
+      if (op === "state") {
+        const res = await fetch(`${PYTHON_BRIDGE_BASE}/api/v1/state`);
+        const data = await res.json().catch(() => null);
+        return withBase({ ok: res.ok, status: res.status, data });
+      }
+      if (op === "gesture") {
+        const action = payload == null ? void 0 : payload.action;
+        const options = (payload == null ? void 0 : payload.options) ?? null;
+        const res = await fetch(`${PYTHON_BRIDGE_BASE}/gesture`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action,
+            options,
+            source: "electron-main"
+          })
+        });
+        return withBase({ ok: res.ok, status: res.status });
+      }
+      return withBase({ ok: false, error: `python-bridge: unknown op "${op}"` });
+    } catch (err) {
+      console.warn("[GestureOS/Main] python-bridge:", (err == null ? void 0 : err.message) || err);
+      return withBase({ ok: false, error: String((err == null ? void 0 : err.message) || err) });
+    }
+  }
   function setupMediaPermissions() {
     const allowMediaPermission = (permission) => permission === "media" || permission === "camera" || permission === "microphone" || permission === "speaker-selection";
     session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
@@ -194,17 +253,79 @@ function requireMain() {
       return null;
     });
   }
+  const FLOATING_WIDTH = 400;
+  const FLOATING_HEIGHT = 640;
+  const FLOATING_MARGIN = 16;
+  function placeFloatingWindow(win) {
+    const { width: wa, height: wh, x: wx, y: wy } = electronScreen.getPrimaryDisplay().workArea;
+    win.setBounds({
+      x: wx + wa - FLOATING_WIDTH - FLOATING_MARGIN,
+      y: wy + wh - FLOATING_HEIGHT - FLOATING_MARGIN,
+      width: FLOATING_WIDTH,
+      height: FLOATING_HEIGHT
+    });
+  }
+  function applyAlwaysOnTopPreference() {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (pinWindowAbove) {
+      mainWindow.setAlwaysOnTop(true, "floating");
+      mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    } else {
+      mainWindow.setAlwaysOnTop(false);
+      mainWindow.setVisibleOnAllWorkspaces(false);
+    }
+  }
+  function rebuildTrayMenu() {
+    if (!tray) return;
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        {
+          label: "Show GestureOS",
+          click: () => {
+            mainWindow == null ? void 0 : mainWindow.show();
+            mainWindow == null ? void 0 : mainWindow.focus();
+          }
+        },
+        {
+          label: "Hide to background",
+          click: () => mainWindow == null ? void 0 : mainWindow.hide()
+        },
+        { type: "separator" },
+        {
+          label: "Pin above other windows",
+          type: "checkbox",
+          checked: pinWindowAbove,
+          click: (item) => {
+            pinWindowAbove = Boolean(item.checked);
+            applyAlwaysOnTopPreference();
+            rebuildTrayMenu();
+          }
+        },
+        { type: "separator" },
+        {
+          label: "Quit completely",
+          click: () => {
+            appIsQuitting = true;
+            app.quit();
+          }
+        }
+      ])
+    );
+  }
   function createWindow() {
     mainWindow = new BrowserWindow({
-      width: 480,
-      height: 780,
-      minWidth: 420,
-      minHeight: 620,
-      alwaysOnTop: true,
+      width: FLOATING_WIDTH,
+      height: FLOATING_HEIGHT,
+      minWidth: 340,
+      minHeight: 480,
+      maxWidth: 720,
+      maxHeight: 900,
+      alwaysOnTop: false,
       autoHideMenuBar: true,
       frame: true,
       backgroundColor: "#081121",
       title: "GestureOS",
+      show: false,
       webPreferences: {
         preload: path.join(__dirname, "preload.cjs"),
         contextIsolation: true,
@@ -213,8 +334,18 @@ function requireMain() {
         backgroundThrottling: false
       }
     });
-    mainWindow.setAlwaysOnTop(true, "screen-saver");
-    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    placeFloatingWindow(mainWindow);
+    applyAlwaysOnTopPreference();
+    mainWindow.once("ready-to-show", () => {
+      mainWindow == null ? void 0 : mainWindow.show();
+    });
+    mainWindow.on("close", (event) => {
+      if (appIsQuitting) {
+        return;
+      }
+      event.preventDefault();
+      mainWindow == null ? void 0 : mainWindow.hide();
+    });
     if (process.env.VITE_DEV_SERVER_URL) {
       mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
     } else {
@@ -227,21 +358,16 @@ function requireMain() {
         "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9s2son8AAAAASUVORK5CYII="
       )
     );
-    tray.setToolTip("GestureOS");
-    tray.setContextMenu(
-      Menu.buildFromTemplate([
-        { label: "Show GestureOS", click: () => mainWindow == null ? void 0 : mainWindow.show() },
-        { label: "Hide Overlay", click: () => mainWindow == null ? void 0 : mainWindow.hide() },
-        { type: "separator" },
-        {
-          label: "Quit",
-          click: () => {
-            app.quit();
-          }
-        }
-      ])
-    );
-    tray.on("double-click", () => mainWindow == null ? void 0 : mainWindow.show());
+    tray.setToolTip("GestureOS — runs in background; use Quit to exit");
+    rebuildTrayMenu();
+    tray.on("double-click", () => {
+      if (mainWindow == null ? void 0 : mainWindow.isVisible()) {
+        mainWindow.hide();
+      } else {
+        mainWindow == null ? void 0 : mainWindow.show();
+        mainWindow == null ? void 0 : mainWindow.focus();
+      }
+    });
   }
   app.whenReady().then(() => {
     if (!app.requestSingleInstanceLock()) {
@@ -252,6 +378,7 @@ function requireMain() {
     if (app.isPackaged) {
       app.setLoginItemSettings({ openAtLogin: true });
     }
+    ipcMain.handle("python-bridge", async (_event, payload) => pythonBridgeIpc(payload));
     ipcMain.handle("perform-action", async (_event, payload) => {
       const action = typeof payload === "string" ? payload : payload == null ? void 0 : payload.action;
       const options = typeof payload === "object" && payload ? payload.options : null;
@@ -268,7 +395,20 @@ function requireMain() {
       mainWindow == null ? void 0 : mainWindow.setIgnoreMouseEvents(Boolean(enabled), { forward: true });
     });
     ipcMain.handle("hide-window", async () => mainWindow == null ? void 0 : mainWindow.hide());
-    ipcMain.handle("show-window", async () => mainWindow == null ? void 0 : mainWindow.show());
+    ipcMain.handle("show-window", async () => {
+      mainWindow == null ? void 0 : mainWindow.show();
+      mainWindow == null ? void 0 : mainWindow.focus();
+    });
+    ipcMain.handle("set-pin-above", async (_event, enabled) => {
+      pinWindowAbove = Boolean(enabled);
+      applyAlwaysOnTopPreference();
+      rebuildTrayMenu();
+      return { ok: true, pinWindowAbove };
+    });
+    ipcMain.handle("get-window-mode", async () => ({
+      pinWindowAbove,
+      floating: { width: FLOATING_WIDTH, height: FLOATING_HEIGHT }
+    }));
     createWindow();
     createTray();
     app.on("activate", () => {
@@ -288,4 +428,6 @@ function requireMain() {
 }
 var mainExports = requireMain();
 const main = /* @__PURE__ */ getDefaultExportFromCjs(mainExports);
-module.exports = main;
+export {
+  main as default
+};
